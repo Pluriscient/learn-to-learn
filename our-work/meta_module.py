@@ -14,7 +14,7 @@ def to_var(x, requires_grad=True):
         x = x.cuda()
     return Variable(x, requires_grad=requires_grad)
 
-class MetaModule(nn.Module):
+class MetaModule(nn.Module):   # MetaModule < torch.nn
     # adopted from: Adrien Ecoffet https://github.com/AdrienLE
     def parameters(self):
        for name, param in self.named_params(self):
@@ -97,7 +97,7 @@ class MetaModule(nn.Module):
             self.set_param(name, param)
 
 
-class MetaLinear(MetaModule):
+class MetaLinear(MetaModule):     # MEtaLinear < MetaModule < torch.nn
     def __init__(self, *args, **kwargs):
         super().__init__()
         ignore = nn.Linear(*args, **kwargs)
@@ -123,10 +123,10 @@ class MetaConv2d(MetaModule):
         self.dilation = ignore.dilation
         self.groups = ignore.groups
         
-        self.register_buffer('weight', to_var(ignore.weight.data, requires_grad=True))
+        self.register_buffer('weight', to_var(ignore.weight.data, requires_grad=True))     # sends them to the gradient buffer
         
         if ignore.bias is not None:
-            self.register_buffer('bias', to_var(ignore.bias.data, requires_grad=True))
+            self.register_buffer('bias', to_var(ignore.bias.data, requires_grad=True))    # sends them to the gradient buffer
         else:
             self.register_buffer('bias', None)
         
@@ -522,7 +522,7 @@ class LeNet(MetaModule):
         super(LeNet, self).__init__()
     
         layers = []
-        layers.append(MetaConv2d(1, 6, kernel_size=5))
+        layers.append(MetaConv2d(1, 6, kernel_size=3))
         layers.append(nn.ReLU(inplace=True))
         layers.append(nn.MaxPool2d(kernel_size=2,stride=2))
 
@@ -530,7 +530,7 @@ class LeNet(MetaModule):
         layers.append(nn.ReLU(inplace=True))
         layers.append(nn.MaxPool2d(kernel_size=2,stride=2))
         
-        layers.append(MetaConv2d(16, 120, kernel_size=5))
+        layers.append(MetaConv2d(16, 120, kernel_size=7))
         layers.append(nn.ReLU(inplace=True))
         
         self.main = nn.Sequential(*layers)

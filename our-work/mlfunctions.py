@@ -6,7 +6,6 @@ import torch.nn.functional as F
 import torch.autograd as autograd
 import torch.optim as optim
 from torch.autograd import Variable
-import matplotlib.pyplot as plt
 import random
 from tqdm.notebook import tqdm
 import multiprocessing
@@ -14,7 +13,6 @@ import os.path
 import csv
 import copy
 import joblib
-from torchvision import datasets
 import torchvision
 import seaborn as sns; sns.set(color_codes=True)
 sns.set_style("white")
@@ -62,7 +60,9 @@ def do_fit(opt_net, meta_opt, target_cls, target_to_opt, unroll, optim_it, n_epo
         n_params += int(np.prod(p.size()))
     hidden_states = [w(Variable(torch.zeros(n_params, opt_net.hidden_sz))) for _ in range(2)]
     cell_states = [w(Variable(torch.zeros(n_params, opt_net.hidden_sz))) for _ in range(2)]
+
     all_losses_ever = []
+    
     if should_train:
         meta_opt.zero_grad()
     all_losses = None
@@ -82,6 +82,7 @@ def do_fit(opt_net, meta_opt, target_cls, target_to_opt, unroll, optim_it, n_epo
         result_params = {}
         hidden_states2 = [w(Variable(torch.zeros(n_params, opt_net.hidden_sz))) for _ in range(2)]
         cell_states2 = [w(Variable(torch.zeros(n_params, opt_net.hidden_sz))) for _ in range(2)]
+
         for name, p in optimizee.all_named_parameters():
             cur_sz = int(np.prod(p.size()))
             # We do this so the gradients are disconnected from the graph but we still get
@@ -193,7 +194,7 @@ class MNISTNet(MetaModule):
         self.layers['final_mat'] = MetaLinear(inp_size, 10)
         self.layers = nn.ModuleDict(self.layers)
 
-        self.activation = nn.Sigmoid() # 
+        self.activation = nn.Sigmoid() # activation function for all layers
         self.loss = nn.NLLLoss()
 
     def all_named_parameters(self):
@@ -217,13 +218,17 @@ class MNISTNet(MetaModule):
 class Optimizer(nn.Module):
     def __init__(self, preproc=False, hidden_sz=20, preproc_factor=10.0):
         super().__init__()
+
         self.hidden_sz = hidden_sz
+
         if preproc:
             self.recurs = nn.LSTMCell(2, hidden_sz)
         else:
             self.recurs = nn.LSTMCell(1, hidden_sz)
+
         self.recurs2 = nn.LSTMCell(hidden_sz, hidden_sz)
         self.output = nn.Linear(hidden_sz, 1)
+
         self.preproc = preproc
         self.preproc_factor = preproc_factor
         self.preproc_threshold = np.exp(-preproc_factor)
@@ -245,6 +250,8 @@ class Optimizer(nn.Module):
             inp2[:, 0][~keep_grads] = -1
             inp2[:, 1][~keep_grads] = (float(np.exp(self.preproc_factor)) * inp[~keep_grads]).squeeze()
             inp = w(Variable(inp2))
+
+        # since preproc = false, only the following is needed:
         hidden0, cell0 = self.recurs(inp, (hidden[0], cell[0]))
         hidden1, cell1 = self.recurs2(hidden0, (hidden[1], cell[1]))
         return self.output(hidden1), (hidden0, hidden1), (cell0, cell1)

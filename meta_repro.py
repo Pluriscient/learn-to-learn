@@ -412,6 +412,7 @@ class ModuleDict(MetaModule):
         Arguments:
             modules (iterable): a mapping (dictionary) from string to :class:`~MetaModule`,
                 or an iterable of key-value pairs of type (string, :class:`~MetaModule`)
+                
         """
         if not isinstance(modules, container_abcs.Iterable):
             raise TypeError("ModuleDict.update should be called with an "
