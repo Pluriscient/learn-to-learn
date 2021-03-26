@@ -23,10 +23,10 @@ from meta_module import MetaLinear, MetaModule
 import functools
 
 USE_CUDA = torch.cuda.is_available()
-
+cuda = torch.device('cuda')   
 def w(v):
     if USE_CUDA:
-        return v.cuda()
+        return v.to(cuda)
     return v
 
 cache = joblib.Memory(location='_cache', verbose=0)
