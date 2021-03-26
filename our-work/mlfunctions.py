@@ -24,7 +24,7 @@ USE_CUDA = torch.cuda.is_available()
 
 def w(v):
     if USE_CUDA:
-        return v.cuda()
+        return v.to("cuda:0")
     return v
 
 cache = joblib.Memory(location='_cache', verbose=0)
