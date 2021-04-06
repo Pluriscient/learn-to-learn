@@ -450,7 +450,8 @@ def fit_normal(
         optimizee.to(device)
         optimizer = opt_class(optimizee.parameters(), **kwargs)
         total_loss = []
-        for epoch in tqdm(range(n_epochs), "epochs", leave=False):
+        iterator = tqdm(range(n_epochs), "epochs", leave=False)
+        for epoch in iterator:
             running_loss = 0.0
             for i, data in enumerate(train_data, 0):
                 # Load data batch
@@ -469,16 +470,15 @@ def fit_normal(
                 optimizer.step()
 
                 # Print statistics (only the loss data)
-                running_loss += loss.item()
-                if i % 2000 == 1999:  # print every 2000 mini-batches
-                    print(
-                        "[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000)
-                    )
-                    running_loss = 0.0
-
+                # running_loss += loss.item()
+                # if i % 2000 == 1999:  # print every 2000 mini-batches
+                #     print(
+                #         "[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000)
+                #     )
+                #     running_loss = 0.0
                 # Save statistics of loss
-                total_loss.append(running_loss)
-
+                total_loss.append(loss.item())
+            iterator.set_postfix_str(f"Loss: {total_loss[-1]}")
         results.append(total_loss)
     return results
 
@@ -503,8 +503,8 @@ def main():
 
     optimizer_names = ["ADAM", "RMSprop", "SGD", "NAG"]
     learning_rates = [0.01, 0.003, 0.03, 0.01]
-    n_tests = 2
-    n_epochs = 10
+    n_tests = 100
+    n_epochs = 100
 
     fit_data = np.zeros((n_tests, n_epochs, len(optimizer_names) + 1))
     for i, (opt, extra_kwargs) in enumerate(optimizers):
@@ -526,8 +526,10 @@ def main():
                 )
             )
             print(f"output of function was {data.shape} array")
+
             np.save(filename, data)
-        fit_data[:, :, i] = data
+        # print(data)
+        # fit_data[:, :, i] = data
 
 
 if __name__ == "__main__":
