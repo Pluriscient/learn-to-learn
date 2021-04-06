@@ -396,12 +396,12 @@ assert args.optimizer_steps % args.truncated_bptt_step == 0
 
 kwargs = {"num_workers": 0, "pin_memory": True} if args.cuda else {}
 device = torch.device("cuda" if args.cuda else "cpu")
-print("Device: " + str(device))
+# print("Device: " + str(device))
 
-DATA_FOLDER = "../data"       # Chnege this!!!!
+DATA_FOLDER = "../dl-datasets/data"  # Chnege this!!!!
 import os
 
-print(os.path.abspath(DATA_FOLDER))
+# print(os.path.abspath(DATA_FOLDER))
 # CIFAR10 data - coloured:
 train_loader = torch.utils.data.DataLoader(
     datasets.CIFAR10(
@@ -417,7 +417,7 @@ train_loader = torch.utils.data.DataLoader(
     ),
     batch_size=args.batch_size,
     shuffle=True,
-    **kwargs
+    **kwargs,
 )
 
 test_loader = torch.utils.data.DataLoader(
@@ -433,32 +433,31 @@ test_loader = torch.utils.data.DataLoader(
     ),
     batch_size=args.batch_size,
     shuffle=True,
-    **kwargs
+    **kwargs,
 )
 
 
 # @cache.cache
 def fit_normal(
-    train_loader, target_to_opt, opt_class, n_tests=100, n_epochs=100, **kwargs
+    train_loader, target_to_opt, opt_class, n_tests=2, n_epochs=100, **kwargs
 ):
     results = []
     criterion = nn.CrossEntropyLoss()
-
-    for i in tqdm(range(n_tests), "tests"):
+    train_data = list(train_loader)
+    for i in tqdm(range(n_tests), "tests", leave=True):
 
         optimizee = target_to_opt()
         optimizee.to(device)
-        optimizer = opt_class(optimizee.parameters(),**kwargs)
+        optimizer = opt_class(optimizee.parameters(), **kwargs)
         total_loss = []
-        for _ in tqdm(range(n_epochs),'epochs'):
+        for epoch in tqdm(range(n_epochs), "epochs", leave=False):
             running_loss = 0.0
-            for i, data in enumerate(train_loader, 0):
+            for i, data in enumerate(train_data, 0):
                 # Load data batch
                 inputs, labels = data
-                
+
                 if args.cuda:
                     inputs, labels = inputs.cuda(), labels.cuda()
-                
 
                 # Zero the parameter gradients
                 optimizer.zero_grad()
@@ -471,11 +470,12 @@ def fit_normal(
 
                 # Print statistics (only the loss data)
                 running_loss += loss.item()
-                if i % 2000 == 1999:    # print every 2000 mini-batches
-                    print('[%d, %5d] loss: %.3f' %
-                        (epoch + 1, i + 1, running_loss / 2000))
+                if i % 2000 == 1999:  # print every 2000 mini-batches
+                    print(
+                        "[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000)
+                    )
                     running_loss = 0.0
-                    
+
                 # Save statistics of loss
                 total_loss.append(running_loss)
 
@@ -494,20 +494,33 @@ def main():
         (torch.optim.SGD, {"nesterov": True, "momentum": 0.9}),
     ]
 
-    [(optim.Adam, {}), (optim.RMSprop, {}), (optim.SGD, {'momentum': 0.9}), (optim.SGD, {'nesterov': True, 'momentum': 0.9})]
+    [
+        (optim.Adam, {}),
+        (optim.RMSprop, {}),
+        (optim.SGD, {"momentum": 0.9}),
+        (optim.SGD, {"nesterov": True, "momentum": 0.9}),
+    ]
 
     optimizer_names = ["ADAM", "RMSprop", "SGD", "NAG"]
     learning_rates = [0.01, 0.003, 0.03, 0.01]
-    n_tests   = 100
+    n_tests = 2
     n_ecpochs = 100
 
     fit_data = np.zeros((n_tests, 200, len(optimizer_names) + 1))
-    for i, (opt,extra_kwargs) in enumerate(optimizers):
+    for i, (opt, extra_kwargs) in enumerate(optimizers):
         np.random.seed(0)
         print(opt)
-        fit_data[:, :, i] = np.array(fit_normal(train_loader, Model_CIFAR10_CNN, opt, lr=learning_rates[i], n_epochs=n_ecpochs,**extra_kwargs))
-
-  
+        fit_data[:, :, i] = np.array(
+            fit_normal(
+                train_loader,
+                Model_CIFAR10_CNN,
+                opt,
+                lr=learning_rates[i],
+                n_epochs=n_ecpochs,
+                n_tests=n_tests,
+                **extra_kwargs,
+            )
+        )
 
 
 if __name__ == "__main__":
