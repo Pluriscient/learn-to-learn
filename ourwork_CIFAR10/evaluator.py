@@ -504,23 +504,30 @@ def main():
     optimizer_names = ["ADAM", "RMSprop", "SGD", "NAG"]
     learning_rates = [0.01, 0.003, 0.03, 0.01]
     n_tests = 2
-    n_ecpochs = 100
+    n_epochs = 10
 
-    fit_data = np.zeros((n_tests, 200, len(optimizer_names) + 1))
+    fit_data = np.zeros((n_tests, n_epochs, len(optimizer_names) + 1))
     for i, (opt, extra_kwargs) in enumerate(optimizers):
         np.random.seed(0)
+        filename = f"{opt.__name__}.npy"
         print(opt)
-        fit_data[:, :, i] = np.array(
-            fit_normal(
-                train_loader,
-                Model_CIFAR10_CNN,
-                opt,
-                lr=learning_rates[i],
-                n_epochs=n_ecpochs,
-                n_tests=n_tests,
-                **extra_kwargs,
+        if os.path.exists(filename):
+            data = np.load(filename)
+        else:
+            data = np.array(
+                fit_normal(
+                    train_loader,
+                    Model_CIFAR10_CNN,
+                    opt,
+                    lr=learning_rates[i],
+                    n_epochs=n_epochs,
+                    n_tests=n_tests,
+                    **extra_kwargs,
+                )
             )
-        )
+            print(f"output of function was {data.shape} array")
+            np.save(filename, data)
+        fit_data[:, :, i] = data
 
 
 if __name__ == "__main__":
