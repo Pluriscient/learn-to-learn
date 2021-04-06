@@ -12,6 +12,7 @@ import numpy as np
 import math
 from functools import reduce
 from operator import mul
+from tqdm import tqdm
 
 
 class Model(nn.Module):
@@ -395,7 +396,9 @@ assert args.optimizer_steps % args.truncated_bptt_step == 0
 
 kwargs = {"num_workers": 0, "pin_memory": True} if args.cuda else {}
 device = torch.device("cuda" if args.cuda else "cpu")
-DATA_FOLDER = "../dl-datasets/data"
+print("Device: " + str(device))
+
+DATA_FOLDER = "../data"       # Chnege this!!!!
 import os
 
 print(os.path.abspath(DATA_FOLDER))
@@ -432,42 +435,79 @@ test_loader = torch.utils.data.DataLoader(
     shuffle=True,
     **kwargs
 )
-import tqdm
+
 
 # @cache.cache
 def fit_normal(
-    target_cls, target_to_opt, opt_class, n_tests=100, n_epochs=100, **kwargs
+    train_loader, target_to_opt, opt_class, n_tests=100, n_epochs=100, **kwargs
 ):
     results = []
+    criterion = nn.CrossEntropyLoss()
+
     for i in tqdm(range(n_tests), "tests"):
-        target = target_cls(training=False)
+
         optimizee = target_to_opt()
         optimizee.to(device)
-        optimizer = opt_class(optimizee.parameters(), **kwargs)
+        optimizer = opt_class(optimizee.parameters(),**kwargs)
         total_loss = []
-        for _ in range(n_epochs):
-            loss = optimizee(target)
-            total_loss.append(loss.data.cpu().numpy())
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
+        for _ in tqdm(range(n_epochs),'epochs'):
+            running_loss = 0.0
+            for i, data in enumerate(train_loader, 0):
+                # Load data batch
+                inputs, labels = data
+                
+                if args.cuda:
+                    inputs, labels = inputs.cuda(), labels.cuda()
+                
+
+                # Zero the parameter gradients
+                optimizer.zero_grad()
+
+                # Forward + backward + optimize
+                outputs = optimizee(inputs)
+                loss = criterion(outputs, labels)
+                loss.backward()
+                optimizer.step()
+
+                # Print statistics (only the loss data)
+                running_loss += loss.item()
+                if i % 2000 == 1999:    # print every 2000 mini-batches
+                    print('[%d, %5d] loss: %.3f' %
+                        (epoch + 1, i + 1, running_loss / 2000))
+                    running_loss = 0.0
+                    
+                # Save statistics of loss
+                total_loss.append(running_loss)
+
         results.append(total_loss)
     return results
 
 
 def main():
-    meta_model = torch.load("ourwork_CIFAR10\model_CIFAR10.pt")
-    optimizers = [
-        (optim.Adam, {}),
-        (optim.RMSprop, {}),
-        (optim.SGD, {"momentum": 0.9}),
-        (optim.SGD, {"nesterov": True, "momentum": 0.9}),
-    ]
-    optimizer_names = ["ADAM", "RMSprop", "SGD", "NAG"]
-    for optim, name in zip(optimizers, optimizer_names):
-        pass
 
-    pass
+    meta_model = torch.load("ourwork_CIFAR10\model_CIFAR10.pt")
+
+    optimizers = [
+        (torch.optim.Adam, {}),
+        (torch.optim.RMSprop, {}),
+        (torch.optim.SGD, {"momentum": 0.9}),
+        (torch.optim.SGD, {"nesterov": True, "momentum": 0.9}),
+    ]
+
+    [(optim.Adam, {}), (optim.RMSprop, {}), (optim.SGD, {'momentum': 0.9}), (optim.SGD, {'nesterov': True, 'momentum': 0.9})]
+
+    optimizer_names = ["ADAM", "RMSprop", "SGD", "NAG"]
+    learning_rates = [0.01, 0.003, 0.03, 0.01]
+    n_tests   = 100
+    n_ecpochs = 100
+
+    fit_data = np.zeros((n_tests, 200, len(optimizer_names) + 1))
+    for i, (opt,extra_kwargs) in enumerate(optimizers):
+        np.random.seed(0)
+        print(opt)
+        fit_data[:, :, i] = np.array(fit_normal(train_loader, Model_CIFAR10_CNN, opt, lr=learning_rates[i], n_epochs=n_ecpochs,**extra_kwargs))
+
+  
 
 
 if __name__ == "__main__":
