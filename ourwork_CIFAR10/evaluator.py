@@ -437,6 +437,70 @@ test_loader = torch.utils.data.DataLoader(
 )
 
 
+def fit_meta(train_loader, target_to_opt, n_tests=2, n_epochs=100):
+    train_data = list(train_loader)
+    criterion = nn.CrossEntropyLoss()
+
+    res = np.zeros((n_tests, n_epochs))
+    for test in tqdm(range(n_tests), "Tests", leave=True):
+        meta_optimizer = torch.load("model_CIFAR10.pt")
+        optimizee = target_to_opt()
+        optimizee.to(device)
+        # possibly
+        # scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.5)
+
+        iterator = tqdm(range(n_epochs), "Epochs", leave=False)
+        for epoch in iterator:
+            final_loss = 0.0
+
+            for inputs, labels in train_data:
+                meta_optimizer.zero_grad()
+                outputs = optimizee(inputs)
+                loss = criterion(outputs, labels)
+
+
+# meta_optimizer = MetaOptimizer(MetaModel(meta_model), args.num_layers, args.hidden_size)
+def do_fit(train_loader, n_epochs, is_training=True):
+    # Create a meta optimizer that wraps a model into a meta model
+    # to keep track of the meta updates.
+    model = Model_CIFAR10_CNN()
+    model.to(device)
+    train_data = list(train_loader)
+
+    meta_optimizer = MetaOptimizer(MetaModel(model), 2, 20)
+    meta_optimizer.load_state_dict(torch.load("ourwork_CIFAR10\model_CIFAR10.pt"))
+    meta_optimizer.to(device)
+    meta_optimizer.reset_lstm(keep_states=False, model=model, use_cuda=True)
+    res = np.zeros((n_epochs))
+    for epoch in tqdm(range(n_epochs)):
+        train_iter = tqdm(train_data, leave=False)
+        losses = []
+        for i, (x, y) in enumerate(train_iter):
+
+            x, y = x.to(device), y.to(device)
+            x, y = Variable(x), Variable(y)
+
+            # x, y = next(train_iter)
+
+            if args.cuda:
+                x, y = x.cuda(), y.cuda()
+            x, y = Variable(x), Variable(y)
+
+            # First we need to compute the gradients of the model
+            f_x = model(x)
+            loss = F.nll_loss(f_x, y)
+
+            model.zero_grad()
+            loss.backward()
+
+            # Perfom a meta update using gradients from model
+            # and return the current meta model saved in the optimizer
+            model = meta_optimizer.meta_update(model, loss.data)
+            losses.append(loss)
+        res[epoch] = losses[-1]
+    return res
+
+
 # @cache.cache
 def fit_normal(
     train_loader, target_to_opt, opt_class, n_tests=2, n_epochs=100, **kwargs
@@ -444,7 +508,9 @@ def fit_normal(
     results = []
     criterion = nn.CrossEntropyLoss()
     train_data = list(train_loader)
-    for i in tqdm(range(n_tests), "tests", leave=True):
+    res = np.zeros((n_tests, n_epochs))
+    print(f"train batches: {len(train_data)}")
+    for test in tqdm(range(n_tests), "tests", leave=True):
 
         optimizee = target_to_opt()
         optimizee.to(device)
@@ -454,6 +520,7 @@ def fit_normal(
         for epoch in iterator:
             running_loss = 0.0
             for i, data in enumerate(train_data, 0):
+
                 # Load data batch
                 inputs, labels = data
 
@@ -468,19 +535,11 @@ def fit_normal(
                 loss = criterion(outputs, labels)
                 loss.backward()
                 optimizer.step()
-
-                # Print statistics (only the loss data)
-                # running_loss += loss.item()
-                # if i % 2000 == 1999:  # print every 2000 mini-batches
-                #     print(
-                #         "[%d, %5d] loss: %.3f" % (epoch + 1, i + 1, running_loss / 2000)
-                #     )
-                #     running_loss = 0.0
-                # Save statistics of loss
                 total_loss.append(loss.item())
+            res[test, epoch] = total_loss[-1]
             iterator.set_postfix_str(f"Loss: {total_loss[-1]}")
         results.append(total_loss)
-    return results
+    return results, res
 
 
 def main():
@@ -494,42 +553,40 @@ def main():
         (torch.optim.SGD, {"nesterov": True, "momentum": 0.9}),
     ]
 
-    [
-        (optim.Adam, {}),
-        (optim.RMSprop, {}),
-        (optim.SGD, {"momentum": 0.9}),
-        (optim.SGD, {"nesterov": True, "momentum": 0.9}),
-    ]
-
     optimizer_names = ["ADAM", "RMSprop", "SGD", "NAG"]
     learning_rates = [0.01, 0.003, 0.03, 0.01]
-    n_tests = 100
+    n_tests = 50
     n_epochs = 100
 
-    fit_data = np.zeros((n_tests, n_epochs, len(optimizer_names) + 1))
-    for i, (opt, extra_kwargs) in enumerate(optimizers):
-        np.random.seed(0)
-        filename = f"{opt.__name__}.npy"
-        print(opt)
-        if os.path.exists(filename):
-            data = np.load(filename)
-        else:
-            data = np.array(
-                fit_normal(
-                    train_loader,
-                    Model_CIFAR10_CNN,
-                    opt,
-                    lr=learning_rates[i],
-                    n_epochs=n_epochs,
-                    n_tests=n_tests,
-                    **extra_kwargs,
-                )
-            )
-            print(f"output of function was {data.shape} array")
+    # fit_data = np.zeros((n_tests, n_epochs, len(optimizer_names) + 1))
+    # for i, ((opt, extra_kwargs), optname) in enumerate(
+    #     zip(optimizers, optimizer_names)
+    # ):
+    #     np.random.seed(0)
+    #     filename = f"{optname}-{n_tests}.npy"
+    #     print(opt)
+    #     if os.path.exists(filename):
+    #         data = np.load(filename)
+    #     else:
+    #         _, data = fit_normal(
+    #             train_loader,
+    #             Model_CIFAR10_CNN,
+    #             opt,
+    #             lr=learning_rates[i],
+    #             n_epochs=n_epochs,
+    #             n_tests=n_tests,
+    #             **extra_kwargs,
+    #         )
 
-            np.save(filename, data)
-        # print(data)
-        # fit_data[:, :, i] = data
+    #         print(f"output of function was {data.shape} array")
+
+    #         np.save(filename, data)
+    # print(data)
+    # fit_data[:, :, i] = data
+    lstm_data = np.zeros((n_tests, n_epochs))
+    for i in range(n_tests):
+        lstm_data[i, :] = do_fit(train_loader, n_epochs, is_training=False)
+    np.save("LSTM.npy", lstm_data)
 
 
 if __name__ == "__main__":
