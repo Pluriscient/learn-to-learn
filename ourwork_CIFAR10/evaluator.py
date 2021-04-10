@@ -143,6 +143,7 @@ class MetaOptimizer(nn.Module):
         grads = []
 
         for module in model_with_grads.children():
+
             try:
                 grads.append(module._parameters["weight"].grad.data.view(-1))
                 grads.append(module._parameters["bias"].grad.data.view(-1))
@@ -391,7 +392,7 @@ parser.add_argument(
 args = parser.parse_args()
 args.cuda = not args.no_cuda and torch.cuda.is_available()
 
-
+# args.cuda = False
 assert args.optimizer_steps % args.truncated_bptt_step == 0
 
 kwargs = {"num_workers": 0, "pin_memory": True} if args.cuda else {}
@@ -465,11 +466,16 @@ def do_fit(train_loader, n_epochs, is_training=True):
     # to keep track of the meta updates.
     model = Model_CIFAR10_CNN()
     model.to(device)
-    train_data = list(train_loader)
-
     meta_optimizer = MetaOptimizer(MetaModel(model), 2, 20)
     meta_optimizer.load_state_dict(torch.load("ourwork_CIFAR10\model_CIFAR10.pt"))
     meta_optimizer.to(device)
+
+    train_data = list(train_loader)
+    x, y = train_data[0]
+    x, y = Variable(x.to(device)), Variable(y.to(device))
+    f_x = model(x)
+    initial_loss = F.nll_loss(f_x, y)
+
     meta_optimizer.reset_lstm(keep_states=False, model=model, use_cuda=True)
     res = np.zeros((n_epochs))
     for epoch in tqdm(range(n_epochs)):
@@ -478,27 +484,133 @@ def do_fit(train_loader, n_epochs, is_training=True):
         for i, (x, y) in enumerate(train_iter):
 
             x, y = x.to(device), y.to(device)
-            x, y = Variable(x), Variable(y)
+            x, y = Variable(x, requires_grad=True), Variable(y, requires_grad=False)
 
-            # x, y = next(train_iter)
-
-            if args.cuda:
-                x, y = x.cuda(), y.cuda()
-            x, y = Variable(x), Variable(y)
-
+            x, y = x.to(device), y.to(device)
             # First we need to compute the gradients of the model
             f_x = model(x)
             loss = F.nll_loss(f_x, y)
+            # seem alright
+            # print(f"x: {x} \nf_x: {f_x}\ny: {y}\nLoss:{loss}")
 
             model.zero_grad()
             loss.backward()
 
             # Perfom a meta update using gradients from model
             # and return the current meta model saved in the optimizer
+            print(f"loss data: {loss.data}")
             model = meta_optimizer.meta_update(model, loss.data)
             losses.append(loss)
         res[epoch] = losses[-1]
     return res
+
+
+def train_meta():
+    train_data = list(train_loader)
+    meta_model = Model_CIFAR10_CNN()
+    if args.cuda:
+        meta_model.cuda()
+
+    meta_optimizer = MetaOptimizer(
+        MetaModel(meta_model), args.num_layers, args.hidden_size
+    )
+    if args.cuda:
+        meta_optimizer.cuda()
+
+    optimizer = optim.Adam(meta_optimizer.parameters(), lr=0.0005)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=30, gamma=0.8)
+
+    for epoch in range(args.max_epoch):
+        decrease_in_loss = 0.0
+        final_loss = 0.0
+        # Define new iterator
+        train_iter = iter(train_data)
+
+        # Iteration counter:
+        num_iter = 0
+
+        for i in range(args.updates_per_epoch):
+
+            # Sample a fresh model (optimizee)
+            model = Model_CIFAR10_CNN()
+            if args.cuda:
+                model.cuda()
+
+            x, y = next(train_iter)
+            num_iter += 1
+            print("New update: " + str(num_iter))
+
+            if args.cuda:
+                x, y = x.cuda(), y.cuda()
+            x, y = Variable(x), Variable(y)
+
+            # Compute initial loss of the model
+            f_x = model(x)
+            initial_loss = F.nll_loss(f_x, y)
+
+            for k in range(
+                args.optimizer_steps // args.truncated_bptt_step
+            ):  # ~"epchos" of the optmizee training
+                # Keep states for truncated BPTT
+                meta_optimizer.reset_lstm(
+                    keep_states=k > 0, model=model, use_cuda=args.cuda
+                )
+
+                loss_sum = 0
+                prev_loss = torch.zeros(1)
+                if args.cuda:
+                    prev_loss = prev_loss.cuda()
+
+                for x, y in train_iter:
+
+                    # x, y = next(train_iter)
+                    # num_iter+=1
+                    # print("Optimizer step %i and step %i" %(k+j,num_iter))
+
+                    if args.cuda:
+                        x, y = x.cuda(), y.cuda()
+                    x, y = Variable(x), Variable(y)
+
+                    # First we need to compute the gradients of the model
+                    f_x = model(x)
+                    loss = F.nll_loss(f_x, y)
+
+                    model.zero_grad()
+                    loss.backward()
+
+                    # Perfom a meta update using gradients from model
+                    # and return the current meta model saved in the optimizer
+                    meta_model = meta_optimizer.meta_update(model, loss.data)
+
+                    # Compute a loss for a step the meta optimizer
+                    f_x = meta_model(x)
+                    loss = F.nll_loss(f_x, y)
+
+                    loss_sum += loss - Variable(prev_loss)
+
+                    prev_loss = loss.data
+
+                # Update the parameters of the meta optimizer (the LSTM network)
+                meta_optimizer.zero_grad()
+                loss_sum.backward()
+                for param in meta_optimizer.parameters():
+                    param.grad.data.clamp_(-1, 1)
+                optimizer.step()
+
+            # Compute relative decrease in the loss function w.r.t initial
+            # value
+
+            scheduler.step()  # decay learnign rate
+            decrease_in_loss += loss.data.item() / initial_loss.data.item()
+            final_loss += loss.data.item()
+
+        print(
+            "Epoch: {}, final loss {}, average final/initial loss ratio: {}".format(
+                epoch,
+                final_loss / args.updates_per_epoch,
+                decrease_in_loss / args.updates_per_epoch,
+            )
+        )
 
 
 # @cache.cache
@@ -543,7 +655,8 @@ def fit_normal(
 
 
 def main():
-
+    train_meta()
+    return
     meta_model = torch.load("ourwork_CIFAR10\model_CIFAR10.pt")
 
     optimizers = [
